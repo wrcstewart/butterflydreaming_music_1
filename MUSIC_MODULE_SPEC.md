@@ -381,3 +381,53 @@ Replace the separate Play and Pause buttons described earlier with:
   beginning of the score
 This is the standard audio player pattern and what users will expect.
 *ButterflyDreaming — a reflective ecosystem — Media Module Spec v0.1*
+## Amendments to Spec v0.2
+
+### Amendment 3 — Sample Filename Correction
+The `#` character in filenames causes URL parsing errors in browsers as it is
+interpreted as a fragment identifier. The sharp symbol is therefore represented
+as `s` in all sample filenames. The correct filenames are:
+
+| Filename                  | Tone.Sampler key |
+|---------------------------|-----------------|
+| bass_recorder_Fs2.mp3     | "F#2"           |
+| bass_recorder_C3.mp3      | "C3"            |
+| bass_recorder_Gs3.mp3     | "G#3"           |
+| bass_recorder_E4.mp3      | "E4"            |
+
+Note: The Tone.Sampler url mapping still uses the correct musical notation
+("F#2", "G#3") as keys — only the actual filenames use `s` for sharp.
+This convention should be followed for all future sample filenames.
+
+### Amendment 4 — Pool-Based Lazy iframe Loading
+Iframes are not pre-loaded at startup. Instead the harness creates an iframe
+the first time a particular module type is triggered. Once created the iframe
+remains in the DOM and is shown/hidden as needed — it is never destroyed or
+reloaded. This means samples load once per session per module type.
+
+### Amendment 5 — Cache Assumption
+This module assumes browser caching is active in production. During development
+the cache may be disabled in DevTools — this is fine but means samples will
+reload on every refresh. Do not design modules to work around cache being
+disabled. Always use Tone.loaded() to gate playback:
+
+```javascript
+await Tone.loaded()
+// safe to enable Play button
+```
+
+### Amendment 6 — Text Display
+The ABC text textarea is removed from music_module.html. Text lives only in
+the harness. The module receives text via BD_INIT, plays it, and only sends
+text back to the harness via BD_UPDATE when the user explicitly requests it.
+
+### Amendment 7 — Play/Pause/Stop Controls
+Confirmed from Amendment 2: a single Play/Pause toggle button plus a separate
+Stop button that returns to the beginning of the score.
+
+### Amendment 8 — Rename harness.html to index.html
+The harness file should be named `index.html` rather than `harness.html`.
+This is the standard convention for the root HTML file of a web project and
+means it loads automatically when the project folder or GitHub Pages URL is
+opened in a browser without specifying a filename. The iframe src reference
+in index.html still points to `music_module.html` unchanged.

@@ -1,4 +1,4 @@
-<!-- ButterflyDreaming Media Module — harness.html — BD Protocol v0.1 -->
+<!-- ButterflyDreaming Media Module — index.html — BD Protocol v0.1 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -100,19 +100,25 @@
       padding: 0.5rem 0.75rem;
     }
 
-    #music-module {
-      border: 1px solid #2a2a3a;
-      display: block;
-      height: 420px;
-      width: 100%;
-    }
-
     .panel-label {
       font-size: 0.8rem;
       letter-spacing: 0.06em;
       text-transform: uppercase;
       color: #4a9b8e;
-      margin-bottom: 0.25rem;
+    }
+
+    /* Amendment 4: container is always present; iframe is injected lazily */
+    #module-container {
+      border: 1px solid #2a2a3a;
+      height: 420px;
+      width: 100%;
+    }
+
+    #module-container iframe {
+      border: none;
+      display: block;
+      height: 100%;
+      width: 100%;
     }
   </style>
 </head>
@@ -137,33 +143,38 @@ K:Amin
       <button id="send-btn">Send to Player</button>
 
       <label>Status</label>
-      <div class="status" id="status-display">Waiting for module…</div>
+      <div class="status" id="status-display">Press Send to Player to load the module.</div>
     </div>
 
-    <!-- Right column: iframe player -->
+    <!-- Right column: player container — iframe injected on first use -->
     <div class="panel">
       <div class="panel-label">Player</div>
-      <iframe
-        id="music-module"
-        src="music_module.html"
-        title="ButterflyDreaming Music Module"
-        allow="autoplay"
-      ></iframe>
+      <!--
+        Amendment 4: pool-based lazy loading.
+        No iframe exists here at startup. The first "Send to Player" click
+        creates it. Thereafter it is kept alive and reused — never reloaded.
+        In a multi-module platform, additional module types would each get their
+        own iframe here, shown/hidden as needed.
+      -->
+      <div id="module-container"></div>
     </div>
 
   </div>
 
   <script>
-    // ── Element refs ────────────────────────────────────────────────────────
-    const textarea     = document.getElementById('abc-input');
-    const sendBtn      = document.getElementById('send-btn');
+    // ── Element refs ──────────────────────────────────────────────────────────
+    const textarea      = document.getElementById('abc-input');
+    const sendBtn       = document.getElementById('send-btn');
     const statusDisplay = document.getElementById('status-display');
-    const moduleFrame  = document.getElementById('music-module');
+    const container     = document.getElementById('module-container');
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-    const setStatus = (text) => {
-      statusDisplay.textContent = text;
-    };
+    // ── Module iframe state (Amendment 4) ─────────────────────────────────────
+    let moduleFrame  = null;  // iframe element, null until first use
+    let moduleReady  = false; // true once BD_READY has been received
+    let pendingText  = null;  // BD_INIT text queued while module is loading
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    const setStatus = (text) => { statusDisplay.textContent = text; };
 
     // Post a message to the music module iframe.
     // Origin is '*' during development.
@@ -175,13 +186,27 @@ K:Amin
     // ── Send to Player ────────────────────────────────────────────────────────
     sendBtn.addEventListener('click', () => {
       const text = textarea.value;
-      postToModule({
-        type: 'BD_INIT',
-        payload: { text }
-      });
+
+      if (!moduleFrame) {
+        // First click: create the iframe and queue the init message.
+        // BD_INIT will be sent automatically when BD_READY arrives.
+        pendingText = text;
+        moduleFrame = document.createElement('iframe');
+        moduleFrame.src   = 'music_module.html';
+        moduleFrame.title = 'ButterflyDreaming Music Module';
+        moduleFrame.allow = 'autoplay';
+        container.appendChild(moduleFrame);
+        setStatus('Loading module…');
+      } else if (moduleReady) {
+        // Module already loaded — send immediately
+        postToModule({ type: 'BD_INIT', payload: { text } });
+      } else {
+        // Module loading but not yet ready — update the queued text
+        pendingText = text;
+      }
     });
 
-    // ── Listen for messages from the module ──────────────────────────────────
+    // ── Listen for messages from the module ───────────────────────────────────
     window.addEventListener('message', (event) => {
       // Origin is '*' during development.
       // TODO: tighten to 'https://butterflydreaming.info' in production.
@@ -190,7 +215,13 @@ K:Amin
 
         switch (type) {
           case 'BD_READY':
+            moduleReady = true;
             setStatus('Module ready');
+            // Dispatch any init that was queued while the module was loading
+            if (pendingText !== null) {
+              postToModule({ type: 'BD_INIT', payload: { text: pendingText } });
+              pendingText = null;
+            }
             break;
 
           case 'BD_UPDATE':
@@ -203,12 +234,11 @@ K:Amin
             break;
 
           default:
-            // Ignore unrecognised message types — other postMessage traffic
-            // (e.g. browser extensions, devtools) may arrive here.
+            // Ignore unrecognised types — other postMessage traffic may arrive
             break;
         }
       } catch (err) {
-        console.error('harness: error handling postMessage', err);
+        console.error('index: error handling postMessage', err);
       }
     });
   </script>

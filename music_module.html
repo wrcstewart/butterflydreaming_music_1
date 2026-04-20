@@ -61,36 +61,6 @@
       color: #3a3a4a;
       cursor: not-allowed;
     }
-
-    label {
-      font-size: 0.78rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: #4a9b8e;
-    }
-
-    textarea {
-      background: #0f0f18;
-      border: 1px solid #2a2a3a;
-      color: #e8e8e0;
-      flex: 1;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 0.82rem;
-      line-height: 1.55;
-      min-height: 140px;
-      outline: none;
-      padding: 0.75rem;
-      resize: vertical;
-      width: 100%;
-    }
-
-    textarea:focus {
-      border-color: #4a9b8e;
-    }
-
-    #send-back-btn {
-      align-self: flex-start;
-    }
   </style>
 </head>
 <body>
@@ -100,12 +70,9 @@
   <div class="controls">
     <button id="play-pause-btn" disabled>Play</button>
     <button id="stop-btn" disabled>Stop</button>
+    <!-- Amendment 6: text lives in the harness; Send Back returns stored text -->
+    <button id="send-back-btn">Send Back</button>
   </div>
-
-  <label for="abc-display">ABC Notation (editable)</label>
-  <textarea id="abc-display" spellcheck="false"></textarea>
-
-  <button id="send-back-btn">Send Back</button>
 
   <!-- Tone.js audio engine -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
@@ -122,26 +89,27 @@
     }
 
     // ── Element refs ──────────────────────────────────────────────────────────
-    const statusEl      = document.getElementById('status');
-    const playPauseBtn  = document.getElementById('play-pause-btn');
-    const stopBtn       = document.getElementById('stop-btn');
-    const abcDisplay    = document.getElementById('abc-display');
-    const sendBackBtn   = document.getElementById('send-back-btn');
+    const statusEl     = document.getElementById('status');
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    const stopBtn      = document.getElementById('stop-btn');
+    const sendBackBtn  = document.getElementById('send-back-btn');
 
     // ── Module state ──────────────────────────────────────────────────────────
-    let samplerReady  = false;
-    let abcReady      = false;  // a valid score has been parsed
-    let playerState   = 'stopped'; // 'stopped' | 'playing' | 'paused' | 'finished'
-    let notePart      = null;   // current Tone.Part
-    let noteEvents    = [];     // [{time, note, duration}] in seconds
-    let endTimeSecs   = 0;      // transport time of last note's end
+    let samplerReady = false;
+    let abcReady     = false;     // a valid score has been parsed
+    let playerState  = 'stopped'; // 'stopped' | 'playing' | 'paused' | 'finished'
+    let notePart     = null;      // current Tone.Part
+    let noteEvents   = [];        // [{time, note, duration}] in seconds
+    let endTimeSecs  = 0;         // transport time of last note's end
+    // Amendment 6: text lives only in the harness; module stores it internally
+    let storedAbcText = '';
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     const setStatus = (msg) => { statusEl.textContent = msg; };
 
     const updateControls = () => {
-      playPauseBtn.disabled = !(samplerReady && abcReady);
-      stopBtn.disabled      = !(samplerReady && abcReady);
+      playPauseBtn.disabled    = !(samplerReady && abcReady);
+      stopBtn.disabled         = !(samplerReady && abcReady);
       playPauseBtn.textContent = (playerState === 'playing') ? 'Pause' : 'Play';
     };
 
@@ -161,11 +129,6 @@
         'E4':  'bass_recorder_E4.mp3'
       },
       baseUrl: './bass-recorder/',
-      onload: () => {
-        samplerReady = true;
-        setStatus(abcReady ? 'Ready — press Play' : 'Ready');
-        updateControls();
-      },
       onerror: (err) => {
         const msg = `Failed to load samples: ${err}`;
         console.error(msg);
@@ -173,6 +136,14 @@
         postToParent({ type: 'BD_ERROR', payload: { message: msg } });
       }
     }).toDestination();
+
+    // Amendment 5: use Tone.loaded() to gate the Play button rather than the
+    // onload callback, so playback is only enabled once all buffers are ready.
+    Tone.loaded().then(() => {
+      samplerReady = true;
+      setStatus(abcReady ? 'Ready — press Play' : 'Ready');
+      updateControls();
+    });
 
     // ── Signal that this module has loaded ────────────────────────────────────
     // Sent immediately on page load, before samples are necessarily ready.
@@ -198,8 +169,7 @@
       const fractional = abcText.match(/Q:\s*(\d+)\/(\d+)\s*=\s*(\d+)/);
       if (fractional) {
         const [, a, b, n] = fractional.map(Number);
-        // n notes of length a/b per minute; convert to quarter-notes per minute
-        return 4 * n * a / b;
+        return 4 * n * a / b; // convert to quarter-notes per minute
       }
       const simple = abcText.match(/Q:\s*(\d+)/);
       if (simple) return parseInt(simple[1], 10);
@@ -224,12 +194,10 @@
               if (elem.rest) continue;
               if (!elem.pitches || elem.pitches.length === 0) continue;
 
-              // Take first pitch; chord upper voices are ignored here
-              const p = elem.pitches[0];
+              const p = elem.pitches[0]; // take first pitch; ignores chord upper voices
               notes.push({
-                tonePitch: abcPitchToTone(p.pitch, p.accidental),
-                // abcjs duration is expressed as a fraction of a whole note
-                durationWhole: elem.duration
+                tonePitch:     abcPitchToTone(p.pitch, p.accidental),
+                durationWhole: elem.duration // fraction of a whole note
               });
             }
           }
@@ -240,17 +208,13 @@
 
     // ── Build timed event list ────────────────────────────────────────────────
     function buildEvents(notes, bpm) {
-      const secondsPerWhole = 240 / bpm; // whole note duration at this BPM
+      const secondsPerWhole = 240 / bpm;
       const events = [];
       let t = 0;
 
       for (const n of notes) {
         const durSecs = n.durationWhole * secondsPerWhole;
-        events.push({
-          time:     t,
-          note:     n.tonePitch,
-          duration: durSecs
-        });
+        events.push({ time: t, note: n.tonePitch, duration: durSecs });
         t += durSecs;
       }
 
@@ -277,7 +241,6 @@
 
       notePart.start(0);
 
-      // Schedule a callback just after the last note ends
       Tone.Transport.scheduleOnce(() => {
         playerState = 'finished';
         setStatus('Finished');
@@ -290,11 +253,9 @@
       updateControls();
     }
 
-    // ── Play / Pause toggle (Amendment 2) ─────────────────────────────────────
+    // ── Play / Pause toggle (Amendments 2 & 7) ────────────────────────────────
     playPauseBtn.addEventListener('click', async () => {
-      // Resume AudioContext on first user gesture (browser policy)
-      await Tone.start();
-
+      await Tone.start(); // resume AudioContext on first user gesture
       if (playerState === 'playing') {
         Tone.Transport.pause();
         playerState = 'paused';
@@ -306,8 +267,7 @@
         setStatus('Playing');
         updateControls();
       } else {
-        // stopped or finished — start from the top
-        startPlayback();
+        startPlayback(); // stopped or finished — restart from top
       }
     });
 
@@ -319,11 +279,11 @@
       updateControls();
     });
 
-    // ── Send Back — posts current textarea contents to parent ─────────────────
+    // ── Send Back — returns stored ABC text to the parent harness ─────────────
     sendBackBtn.addEventListener('click', () => {
       postToParent({
         type: 'BD_UPDATE',
-        payload: { text: abcDisplay.value }
+        payload: { text: storedAbcText }
       });
     });
 
@@ -340,7 +300,6 @@
       }
 
       const notes = extractNotes(parsed);
-
       if (notes.length === 0) {
         const msg = 'No playable notes found';
         setStatus(msg);
@@ -354,13 +313,11 @@
       Tone.Transport.bpm.value = bpm;
 
       const built = buildEvents(notes, bpm);
-      noteEvents   = built.events;
-      endTimeSecs  = built.endTime;
+      noteEvents  = built.events;
+      endTimeSecs = built.endTime;
 
-      // Stop any in-progress playback when new score arrives
       teardownPlayback();
       playerState = 'stopped';
-
       abcReady = true;
       setStatus(samplerReady ? 'Ready — press Play' : 'Loading samples…');
       updateControls();
@@ -375,7 +332,7 @@
 
         switch (type) {
           case 'BD_INIT':
-            abcDisplay.value = payload.text;
+            storedAbcText = payload.text; // Amendment 6: store text, no textarea
             processABC(payload.text);
             break;
 
@@ -387,7 +344,6 @@
             break;
 
           default:
-            // Ignore unrecognised types — other postMessage traffic may arrive
             break;
         }
       } catch (err) {
