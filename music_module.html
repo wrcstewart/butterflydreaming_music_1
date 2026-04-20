@@ -18,7 +18,7 @@
       font-family: Georgia, 'Times New Roman', serif;
       display: flex;
       flex-direction: column;
-      gap: 0.9rem;
+      gap: 1rem;
       padding: 1.4rem;
       min-height: 100vh;
     }
@@ -48,18 +48,70 @@
       text-transform: uppercase;
     }
 
-    button:hover:not(:disabled) {
-      background: #1a2a28;
-    }
-
-    button:active:not(:disabled) {
-      background: #243f3b;
-    }
-
+    button:hover:not(:disabled) { background: #1a2a28; }
+    button:active:not(:disabled) { background: #243f3b; }
     button:disabled {
       border-color: #2a2a3a;
       color: #3a3a4a;
       cursor: not-allowed;
+    }
+
+    /* ── Reverb controls ───────────────────────────────────────────────────── */
+    #reverb-section {
+      border: 1px solid #1e1e2a;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      padding: 0.75rem;
+    }
+
+    .section-label {
+      color: #4a9b8e;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .slider-row {
+      align-items: center;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .slider-end-label {
+      color: #6a8a84;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      min-width: 2.4rem;
+      text-transform: uppercase;
+    }
+
+    .slider-end-label.right {
+      text-align: right;
+    }
+
+    .slider-row input[type="range"] {
+      accent-color: #4a9b8e;
+      cursor: pointer;
+      flex: 1;
+    }
+
+    .decay-marks {
+      color: #3a4a48;
+      display: flex;
+      font-size: 0.62rem;
+      justify-content: space-between;
+      letter-spacing: 0.02em;
+      /* indent to align with the slider track */
+      padding: 0 0.25rem;
+    }
+
+    #decay-display {
+      color: #9e9e90;
+      font-size: 0.75rem;
+      font-style: italic;
+      min-width: 3.2rem;
+      text-align: right;
     }
   </style>
 </head>
@@ -70,8 +122,37 @@
   <div class="controls">
     <button id="play-pause-btn" disabled>Play</button>
     <button id="stop-btn" disabled>Stop</button>
-    <!-- Amendment 6: text lives in the harness; Send Back returns stored text -->
+    <!-- Amendment 6: text lives in the harness; Send Back returns stored text
+         with current %%bd_ parameters encoded (Amendment 9) -->
     <button id="send-back-btn">Send Back</button>
+  </div>
+
+  <!-- Amendment 9: reverb controls -->
+  <div id="reverb-section">
+    <span class="section-label">Reverb</span>
+
+    <div class="slider-row">
+      <span class="slider-end-label">Dry</span>
+      <input type="range" id="wet-slider" min="0" max="1" step="0.01" value="0.3">
+      <span class="slider-end-label right">Wet</span>
+    </div>
+
+    <div class="slider-row">
+      <span class="slider-end-label">Decay</span>
+      <input type="range" id="decay-slider" min="-1" max="2" step="0.01" value="0"
+             list="decay-marks-list">
+      <datalist id="decay-marks-list">
+        <option value="-1"></option>
+        <option value="0"></option>
+        <option value="1"></option>
+        <option value="2"></option>
+      </datalist>
+      <span id="decay-display">1.0s</span>
+    </div>
+    <!-- guide marks for the decay slider exponent positions -->
+    <div class="decay-marks">
+      <span>0.1s</span><span>1s</span><span>10s</span><span>100s</span>
+    </div>
   </div>
 
   <!-- Tone.js audio engine -->
@@ -89,19 +170,22 @@
     }
 
     // ── Element refs ──────────────────────────────────────────────────────────
-    const statusEl     = document.getElementById('status');
-    const playPauseBtn = document.getElementById('play-pause-btn');
-    const stopBtn      = document.getElementById('stop-btn');
-    const sendBackBtn  = document.getElementById('send-back-btn');
+    const statusEl      = document.getElementById('status');
+    const playPauseBtn  = document.getElementById('play-pause-btn');
+    const stopBtn       = document.getElementById('stop-btn');
+    const sendBackBtn   = document.getElementById('send-back-btn');
+    const wetSlider     = document.getElementById('wet-slider');
+    const decaySlider   = document.getElementById('decay-slider');
+    const decayDisplay  = document.getElementById('decay-display');
 
     // ── Module state ──────────────────────────────────────────────────────────
-    let samplerReady = false;
-    let abcReady     = false;     // a valid score has been parsed
-    let playerState  = 'stopped'; // 'stopped' | 'playing' | 'paused' | 'finished'
-    let notePart     = null;      // current Tone.Part
-    let noteEvents   = [];        // [{time, note, duration}] in seconds
-    let endTimeSecs  = 0;         // transport time of last note's end
-    // Amendment 6: text lives only in the harness; module stores it internally
+    let samplerReady  = false;
+    let abcReady      = false;
+    let playerState   = 'stopped'; // 'stopped' | 'playing' | 'paused' | 'finished'
+    let notePart      = null;
+    let noteEvents    = [];
+    let endTimeSecs   = 0;
+    // Amendment 6: text stored internally; no textarea in module
     let storedAbcText = '';
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -120,7 +204,18 @@
       window.parent.postMessage(message, '*');
     };
 
-    // ── Sampler initialisation ────────────────────────────────────────────────
+    // ── Reverb display helper ─────────────────────────────────────────────────
+    function formatDecaySecs(secs) {
+      if (secs < 1)  return `${secs.toFixed(2)}s`;
+      if (secs < 10) return `${secs.toFixed(1)}s`;
+      return `${Math.round(secs)}s`;
+    }
+
+    // ── Audio chain: Sampler → Reverb → Destination ───────────────────────────
+    // Amendment 9: reverb inserted between sampler and output.
+    const reverb = new Tone.Reverb({ decay: 1.0 });
+    reverb.wet.value = 0.3;
+
     const sampler = new Tone.Sampler({
       urls: {
         'F#2': 'bass_recorder_Fs2.mp3',
@@ -135,23 +230,95 @@
         setStatus(msg);
         postToParent({ type: 'BD_ERROR', payload: { message: msg } });
       }
-    }).toDestination();
+    });
 
-    // Amendment 5: use Tone.loaded() to gate the Play button rather than the
-    // onload callback, so playback is only enabled once all buffers are ready.
-    Tone.loaded().then(() => {
+    sampler.connect(reverb);
+    reverb.toDestination();
+
+    // Amendment 5 + 9: gate Play button on both sample buffers and reverb IR.
+    Promise.all([Tone.loaded(), reverb.ready]).then(() => {
       samplerReady = true;
       setStatus(abcReady ? 'Ready — press Play' : 'Ready');
       updateControls();
     });
 
-    // ── Signal that this module has loaded ────────────────────────────────────
-    // Sent immediately on page load, before samples are necessarily ready.
+    // ── Signal module loaded ──────────────────────────────────────────────────
     postToParent({ type: 'BD_READY' });
 
+    // ── %%bd_ parameter parsing ───────────────────────────────────────────────
+    // Reads %%bd_reverb_wet and %%bd_reverb_decay from the ABC header.
+    // Returns null for any value not found (caller uses defaults).
+    function parseBdParams(text) {
+      const wetMatch   = text.match(/^%%bd_reverb_wet\s+([\d.]+)/m);
+      const decayMatch = text.match(/^%%bd_reverb_decay\s+([\d.]+)/m);
+      return {
+        wet:   wetMatch   ? parseFloat(wetMatch[1])   : null,
+        decay: decayMatch ? parseFloat(decayMatch[1]) : null  // seconds
+      };
+    }
+
+    // ── %%bd_ parameter encoding ──────────────────────────────────────────────
+    // Replaces existing %%bd_ lines or inserts them before the first bar line.
+    // decay is stored as actual seconds (not slider position).
+    function encodeBdParams(text, wet, decaySecs) {
+      const wetLine   = `%%bd_reverb_wet ${wet.toFixed(2)}`;
+      const decayLine = `%%bd_reverb_decay ${decaySecs.toFixed(3)}`;
+
+      // Replace any existing %%bd_ lines in place
+      let result = text
+        .replace(/^%%bd_reverb_wet\s+[\d.]+/m,   wetLine)
+        .replace(/^%%bd_reverb_decay\s+[\d.]+/m, decayLine);
+
+      const hasWet   = /^%%bd_reverb_wet/m.test(result);
+      const hasDecay = /^%%bd_reverb_decay/m.test(result);
+
+      if (!hasWet || !hasDecay) {
+        // Insert missing lines just before the first bar line
+        const lines = result.split('\n');
+        let insertIdx = lines.findIndex(l => l.includes('|'));
+        if (insertIdx === -1) insertIdx = lines.length;
+
+        if (!hasWet)   lines.splice(insertIdx, 0, wetLine);
+        if (!hasDecay) lines.splice(insertIdx + (hasWet ? 0 : 1), 0, decayLine);
+        result = lines.join('\n');
+      }
+
+      return result;
+    }
+
+    // ── Apply %%bd_ params to UI + reverb ─────────────────────────────────────
+    // wet: 0–1 directly. decay: seconds → convert to slider pos via log10.
+    function applyBdParams(wet, decaySecs) {
+      wetSlider.value     = wet;
+      reverb.wet.value    = wet;
+
+      const sliderPos     = Math.log10(decaySecs);
+      decaySlider.value   = sliderPos;
+      decayDisplay.textContent = formatDecaySecs(decaySecs);
+      reverb.decay        = decaySecs;
+      reverb.generate();  // rebuild IR with new decay (async, fire-and-forget here)
+    }
+
+    // ── Wet slider ────────────────────────────────────────────────────────────
+    wetSlider.addEventListener('input', () => {
+      reverb.wet.value = parseFloat(wetSlider.value);
+    });
+
+    // ── Decay slider ──────────────────────────────────────────────────────────
+    // Slider position x → actual decay = 10^x seconds.
+    // Debounced generate() to avoid rebuilding the IR on every pixel of drag.
+    let decayTimer = null;
+    decaySlider.addEventListener('input', () => {
+      const x = parseFloat(decaySlider.value);
+      const decaySecs = Math.pow(10, x);
+      decayDisplay.textContent = formatDecaySecs(decaySecs);
+      reverb.decay = decaySecs;
+      clearTimeout(decayTimer);
+      decayTimer = setTimeout(() => { reverb.generate(); }, 150);
+    });
+
     // ── ABC pitch → Tone.js note string ──────────────────────────────────────
-    // abcjs encodes pitch as a diatonic integer where 0 = C in the default ABC
-    // octave. Per the BD spec, ABC uppercase C (no modifier) = C4 in Tone.js.
+    // abcjs diatonic integer: 0 = C in ABC default octave = C4 in Tone.js.
     // Each step of 7 is one octave: pitch 7 = C5, pitch -7 = C3.
     const DIATONIC = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
     const ACC_MAP  = { sharp: '#', flat: 'b', dblsharp: '##', dblflat: 'bb' };
@@ -164,12 +331,11 @@
     }
 
     // ── Parse BPM from Q: field ───────────────────────────────────────────────
-    // Handles Q:1/4=60 (standard) and plain Q:60 formats.
     function parseBPM(abcText) {
-      const fractional = abcText.match(/Q:\s*(\d+)\/(\d+)\s*=\s*(\d+)/);
-      if (fractional) {
-        const [, a, b, n] = fractional.map(Number);
-        return 4 * n * a / b; // convert to quarter-notes per minute
+      const frac = abcText.match(/Q:\s*(\d+)\/(\d+)\s*=\s*(\d+)/);
+      if (frac) {
+        const [, a, b, n] = frac.map(Number);
+        return 4 * n * a / b;
       }
       const simple = abcText.match(/Q:\s*(\d+)/);
       if (simple) return parseInt(simple[1], 10);
@@ -177,8 +343,7 @@
     }
 
     // ── Extract notes from abcjs parseOnly output ─────────────────────────────
-    // Amendment 1: use abcjs note objects directly — the parser has already
-    // applied key signature accidentals, so pitch.accidental is authoritative.
+    // Amendment 1: use parsed note objects directly so key-sig accidentals apply.
     function extractNotes(parsed) {
       const notes = [];
       const tune = parsed && parsed[0];
@@ -194,7 +359,7 @@
               if (elem.rest) continue;
               if (!elem.pitches || elem.pitches.length === 0) continue;
 
-              const p = elem.pitches[0]; // take first pitch; ignores chord upper voices
+              const p = elem.pitches[0];
               notes.push({
                 tonePitch:     abcPitchToTone(p.pitch, p.accidental),
                 durationWhole: elem.duration // fraction of a whole note
@@ -211,23 +376,17 @@
       const secondsPerWhole = 240 / bpm;
       const events = [];
       let t = 0;
-
       for (const n of notes) {
         const durSecs = n.durationWhole * secondsPerWhole;
         events.push({ time: t, note: n.tonePitch, duration: durSecs });
         t += durSecs;
       }
-
       return { events, endTime: t };
     }
 
     // ── Playback scheduling ───────────────────────────────────────────────────
     function teardownPlayback() {
-      if (notePart) {
-        notePart.stop(0);
-        notePart.dispose();
-        notePart = null;
-      }
+      if (notePart) { notePart.stop(0); notePart.dispose(); notePart = null; }
       Tone.Transport.stop();
       Tone.Transport.cancel(0);
     }
@@ -253,9 +412,9 @@
       updateControls();
     }
 
-    // ── Play / Pause toggle (Amendments 2 & 7) ────────────────────────────────
+    // ── Play / Pause toggle (Amendments 2, 7) ─────────────────────────────────
     playPauseBtn.addEventListener('click', async () => {
-      await Tone.start(); // resume AudioContext on first user gesture
+      await Tone.start();
       if (playerState === 'playing') {
         Tone.Transport.pause();
         playerState = 'paused';
@@ -267,7 +426,7 @@
         setStatus('Playing');
         updateControls();
       } else {
-        startPlayback(); // stopped or finished — restart from top
+        startPlayback();
       }
     });
 
@@ -279,12 +438,15 @@
       updateControls();
     });
 
-    // ── Send Back — returns stored ABC text to the parent harness ─────────────
+    // ── Send Back ─────────────────────────────────────────────────────────────
+    // Reads current slider values, encodes them as %%bd_ lines, and sends
+    // the complete updated ABC text back to the parent via BD_UPDATE.
     sendBackBtn.addEventListener('click', () => {
-      postToParent({
-        type: 'BD_UPDATE',
-        payload: { text: storedAbcText }
-      });
+      const wet      = parseFloat(wetSlider.value);
+      const decaySecs = Math.pow(10, parseFloat(decaySlider.value));
+      const updatedText = encodeBdParams(storedAbcText, wet, decaySecs);
+      storedAbcText = updatedText; // keep in sync for subsequent Send Backs
+      postToParent({ type: 'BD_UPDATE', payload: { text: updatedText } });
     });
 
     // ── ABC parsing ───────────────────────────────────────────────────────────
@@ -331,10 +493,21 @@
         const { type, payload } = event.data;
 
         switch (type) {
-          case 'BD_INIT':
-            storedAbcText = payload.text; // Amendment 6: store text, no textarea
+
+          case 'BD_INIT': {
+            storedAbcText = payload.text;
+
+            // Amendment 9: parse %%bd_ params and apply to sliders + reverb.
+            // If not present, sliders remain at their current values.
+            const { wet, decay } = parseBdParams(payload.text);
+            applyBdParams(
+              wet   !== null ? wet   : parseFloat(wetSlider.value),
+              decay !== null ? decay : Math.pow(10, parseFloat(decaySlider.value))
+            );
+
             processABC(payload.text);
             break;
+          }
 
           case 'BD_STOP':
             teardownPlayback();

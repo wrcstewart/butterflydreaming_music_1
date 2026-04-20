@@ -431,3 +431,80 @@ This is the standard convention for the root HTML file of a web project and
 means it loads automatically when the project folder or GitHub Pages URL is
 opened in a browser without specifying a filename. The iframe src reference
 in index.html still points to `music_module.html` unchanged.
+
+### Amendment 9 — Reverb Controls and %%bd_ Parameter Round-Trip
+
+#### Reverb Effect
+music_module.html adds a Tone.Reverb effect between the Tone.Sampler and the
+destination:
+
+```javascript
+const reverb = new Tone.Reverb()
+sampler.connect(reverb)
+reverb.toDestination()
+```
+
+#### Reverb Controls
+Two sliders are added to music_module.html:
+
+**Wet/Dry slider:**
+- Linear range 0 to 1
+- Left label: "Dry"  Right label: "Wet"
+- Default: 0.3
+- Maps directly to reverb.wet.value
+
+**Decay slider:**
+- Slider position range: -1 to 2 (the exponent x)
+- Actual decay value calculated as: decay = 10^x seconds
+- Default slider position: 0 (= 1 second decay)
+- Maps to reverb.decay
+- Display the calculated value next to the slider e.g. "1.0s"
+- Marked positions: -1 = 0.1s, 0 = 1s, 1 = 10s, 2 = 100s (experimental)
+
+#### %%bd_ Parameter Encoding
+Reverb parameters are encoded in the ABC text using the %%bd_ namespace prefix
+to avoid collision with standard abcjs directives. These lines appear as plain
+text in the ABC header, after the standard fields and before the first bar line.
+Example:
+
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 1.8
+
+The value stored for %%bd_reverb_decay is the actual decay time in seconds,
+not the slider position. The module converts between seconds and slider position
+internally using x = log10(decay).
+
+#### Outbound — Module to index.html
+When the user presses Send Back, the module:
+1. Reads current slider values
+2. Calculates actual parameter values
+3. Updates or inserts %%bd_ lines in the ABC text
+4. Sends the complete updated ABC text via BD_UPDATE
+
+If %%bd_ lines already exist in the text they are replaced in place.
+If they do not exist they are inserted after the last standard ABC header
+field and before the first bar line.
+
+#### Inbound — index.html to Module
+When BD_INIT is received, the module:
+1. Parses the ABC text for any %%bd_ fields
+2. If %%bd_reverb_wet found — set wet/dry slider to that value
+3. If %%bd_reverb_decay found — convert seconds to slider position
+   using x = log10(decay), set decay slider to x
+4. If no %%bd_ fields found — leave sliders at current defaults
+5. Apply the parameter values to the Tone.Reverb instance immediately
+
+#### Default Values
+If no %%bd_ fields are present in the incoming ABC text:
+- Wet/Dry: 0.3
+- Decay: 1.0s (slider position 0)
+
+#### Developer Note on Tone.Reverb Initialisation
+Tone.Reverb generates its impulse response asynchronously. Always await it
+before starting playback:
+
+```javascript
+await reverb.ready
+```
+
+This should be awaited alongside Tone.loaded() during initialisation.
