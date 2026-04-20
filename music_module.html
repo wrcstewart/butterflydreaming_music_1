@@ -1,0 +1,400 @@
+<!-- ButterflyDreaming Media Module — music_module.html — BD Protocol v0.1 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ButterflyDreaming — Music Module</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #0a0a0f;
+      color: #e8e8e0;
+      font-family: Georgia, 'Times New Roman', serif;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      padding: 1.4rem;
+      min-height: 100vh;
+    }
+
+    #status {
+      font-size: 0.85rem;
+      font-style: italic;
+      color: #9e9e90;
+      letter-spacing: 0.04em;
+      min-height: 1.4rem;
+    }
+
+    .controls {
+      display: flex;
+      gap: 0.6rem;
+    }
+
+    button {
+      background: #0f0f18;
+      border: 1px solid #4a9b8e;
+      color: #4a9b8e;
+      cursor: pointer;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.05em;
+      padding: 0.45rem 1.1rem;
+      text-transform: uppercase;
+    }
+
+    button:hover:not(:disabled) {
+      background: #1a2a28;
+    }
+
+    button:active:not(:disabled) {
+      background: #243f3b;
+    }
+
+    button:disabled {
+      border-color: #2a2a3a;
+      color: #3a3a4a;
+      cursor: not-allowed;
+    }
+
+    label {
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #4a9b8e;
+    }
+
+    textarea {
+      background: #0f0f18;
+      border: 1px solid #2a2a3a;
+      color: #e8e8e0;
+      flex: 1;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.82rem;
+      line-height: 1.55;
+      min-height: 140px;
+      outline: none;
+      padding: 0.75rem;
+      resize: vertical;
+      width: 100%;
+    }
+
+    textarea:focus {
+      border-color: #4a9b8e;
+    }
+
+    #send-back-btn {
+      align-self: flex-start;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="status">Loading samples…</div>
+
+  <div class="controls">
+    <button id="play-pause-btn" disabled>Play</button>
+    <button id="stop-btn" disabled>Stop</button>
+  </div>
+
+  <label for="abc-display">ABC Notation (editable)</label>
+  <textarea id="abc-display" spellcheck="false"></textarea>
+
+  <button id="send-back-btn">Send Back</button>
+
+  <!-- Tone.js audio engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+  <!-- abcjs for ABC notation parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/abcjs/6.2.2/abcjs-basic-min.js"></script>
+
+  <script>
+    'use strict';
+
+    // ── Web Audio guard ───────────────────────────────────────────────────────
+    if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') {
+      document.getElementById('status').textContent =
+        'Web Audio not supported in this browser';
+    }
+
+    // ── Element refs ──────────────────────────────────────────────────────────
+    const statusEl      = document.getElementById('status');
+    const playPauseBtn  = document.getElementById('play-pause-btn');
+    const stopBtn       = document.getElementById('stop-btn');
+    const abcDisplay    = document.getElementById('abc-display');
+    const sendBackBtn   = document.getElementById('send-back-btn');
+
+    // ── Module state ──────────────────────────────────────────────────────────
+    let samplerReady  = false;
+    let abcReady      = false;  // a valid score has been parsed
+    let playerState   = 'stopped'; // 'stopped' | 'playing' | 'paused' | 'finished'
+    let notePart      = null;   // current Tone.Part
+    let noteEvents    = [];     // [{time, note, duration}] in seconds
+    let endTimeSecs   = 0;      // transport time of last note's end
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    const setStatus = (msg) => { statusEl.textContent = msg; };
+
+    const updateControls = () => {
+      playPauseBtn.disabled = !(samplerReady && abcReady);
+      stopBtn.disabled      = !(samplerReady && abcReady);
+      playPauseBtn.textContent = (playerState === 'playing') ? 'Pause' : 'Play';
+    };
+
+    // Post a message to the parent window.
+    // Origin is '*' during development.
+    // TODO: tighten to 'https://butterflydreaming.info' in production.
+    const postToParent = (message) => {
+      window.parent.postMessage(message, '*');
+    };
+
+    // ── Sampler initialisation ────────────────────────────────────────────────
+    const sampler = new Tone.Sampler({
+      urls: {
+        'F#2': 'bass_recorder_Fs2.mp3',
+        'C3':  'bass_recorder_C3.mp3',
+        'G#3': 'bass_recorder_Gs3.mp3',
+        'E4':  'bass_recorder_E4.mp3'
+      },
+      baseUrl: './bass-recorder/',
+      onload: () => {
+        samplerReady = true;
+        setStatus(abcReady ? 'Ready — press Play' : 'Ready');
+        updateControls();
+      },
+      onerror: (err) => {
+        const msg = `Failed to load samples: ${err}`;
+        console.error(msg);
+        setStatus(msg);
+        postToParent({ type: 'BD_ERROR', payload: { message: msg } });
+      }
+    }).toDestination();
+
+    // ── Signal that this module has loaded ────────────────────────────────────
+    // Sent immediately on page load, before samples are necessarily ready.
+    postToParent({ type: 'BD_READY' });
+
+    // ── ABC pitch → Tone.js note string ──────────────────────────────────────
+    // abcjs encodes pitch as a diatonic integer where 0 = C in the default ABC
+    // octave. Per the BD spec, ABC uppercase C (no modifier) = C4 in Tone.js.
+    // Each step of 7 is one octave: pitch 7 = C5, pitch -7 = C3.
+    const DIATONIC = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+    const ACC_MAP  = { sharp: '#', flat: 'b', dblsharp: '##', dblflat: 'bb' };
+
+    function abcPitchToTone(abcPitch, accidental) {
+      const octave  = 4 + Math.floor(abcPitch / 7);
+      const noteIdx = ((abcPitch % 7) + 7) % 7;
+      const acc     = ACC_MAP[accidental] || '';
+      return `${DIATONIC[noteIdx]}${acc}${octave}`;
+    }
+
+    // ── Parse BPM from Q: field ───────────────────────────────────────────────
+    // Handles Q:1/4=60 (standard) and plain Q:60 formats.
+    function parseBPM(abcText) {
+      const fractional = abcText.match(/Q:\s*(\d+)\/(\d+)\s*=\s*(\d+)/);
+      if (fractional) {
+        const [, a, b, n] = fractional.map(Number);
+        // n notes of length a/b per minute; convert to quarter-notes per minute
+        return 4 * n * a / b;
+      }
+      const simple = abcText.match(/Q:\s*(\d+)/);
+      if (simple) return parseInt(simple[1], 10);
+      return 120;
+    }
+
+    // ── Extract notes from abcjs parseOnly output ─────────────────────────────
+    // Amendment 1: use abcjs note objects directly — the parser has already
+    // applied key signature accidentals, so pitch.accidental is authoritative.
+    function extractNotes(parsed) {
+      const notes = [];
+      const tune = parsed && parsed[0];
+      if (!tune || !tune.lines) return notes;
+
+      for (const line of tune.lines) {
+        if (!line.staff) continue;
+        for (const staff of line.staff) {
+          if (!staff.voices) continue;
+          for (const voice of staff.voices) {
+            for (const elem of voice) {
+              if (elem.el_type !== 'note') continue;
+              if (elem.rest) continue;
+              if (!elem.pitches || elem.pitches.length === 0) continue;
+
+              // Take first pitch; chord upper voices are ignored here
+              const p = elem.pitches[0];
+              notes.push({
+                tonePitch: abcPitchToTone(p.pitch, p.accidental),
+                // abcjs duration is expressed as a fraction of a whole note
+                durationWhole: elem.duration
+              });
+            }
+          }
+        }
+      }
+      return notes;
+    }
+
+    // ── Build timed event list ────────────────────────────────────────────────
+    function buildEvents(notes, bpm) {
+      const secondsPerWhole = 240 / bpm; // whole note duration at this BPM
+      const events = [];
+      let t = 0;
+
+      for (const n of notes) {
+        const durSecs = n.durationWhole * secondsPerWhole;
+        events.push({
+          time:     t,
+          note:     n.tonePitch,
+          duration: durSecs
+        });
+        t += durSecs;
+      }
+
+      return { events, endTime: t };
+    }
+
+    // ── Playback scheduling ───────────────────────────────────────────────────
+    function teardownPlayback() {
+      if (notePart) {
+        notePart.stop(0);
+        notePart.dispose();
+        notePart = null;
+      }
+      Tone.Transport.stop();
+      Tone.Transport.cancel(0);
+    }
+
+    function startPlayback() {
+      teardownPlayback();
+
+      notePart = new Tone.Part((time, ev) => {
+        sampler.triggerAttackRelease(ev.note, ev.duration, time);
+      }, noteEvents);
+
+      notePart.start(0);
+
+      // Schedule a callback just after the last note ends
+      Tone.Transport.scheduleOnce(() => {
+        playerState = 'finished';
+        setStatus('Finished');
+        updateControls();
+      }, endTimeSecs + 0.05);
+
+      Tone.Transport.start();
+      playerState = 'playing';
+      setStatus('Playing');
+      updateControls();
+    }
+
+    // ── Play / Pause toggle (Amendment 2) ─────────────────────────────────────
+    playPauseBtn.addEventListener('click', async () => {
+      // Resume AudioContext on first user gesture (browser policy)
+      await Tone.start();
+
+      if (playerState === 'playing') {
+        Tone.Transport.pause();
+        playerState = 'paused';
+        setStatus('Paused');
+        updateControls();
+      } else if (playerState === 'paused') {
+        Tone.Transport.start();
+        playerState = 'playing';
+        setStatus('Playing');
+        updateControls();
+      } else {
+        // stopped or finished — start from the top
+        startPlayback();
+      }
+    });
+
+    // ── Stop ──────────────────────────────────────────────────────────────────
+    stopBtn.addEventListener('click', () => {
+      teardownPlayback();
+      playerState = 'stopped';
+      setStatus('Stopped');
+      updateControls();
+    });
+
+    // ── Send Back — posts current textarea contents to parent ─────────────────
+    sendBackBtn.addEventListener('click', () => {
+      postToParent({
+        type: 'BD_UPDATE',
+        payload: { text: abcDisplay.value }
+      });
+    });
+
+    // ── ABC parsing ───────────────────────────────────────────────────────────
+    function processABC(text) {
+      let parsed;
+      try {
+        parsed = ABCJS.parseOnly(text);
+      } catch (err) {
+        const msg = 'Failed to parse ABC notation';
+        setStatus(msg);
+        postToParent({ type: 'BD_ERROR', payload: { message: msg } });
+        return;
+      }
+
+      const notes = extractNotes(parsed);
+
+      if (notes.length === 0) {
+        const msg = 'No playable notes found';
+        setStatus(msg);
+        postToParent({ type: 'BD_ERROR', payload: { message: msg } });
+        abcReady = false;
+        updateControls();
+        return;
+      }
+
+      const bpm = parseBPM(text);
+      Tone.Transport.bpm.value = bpm;
+
+      const built = buildEvents(notes, bpm);
+      noteEvents   = built.events;
+      endTimeSecs  = built.endTime;
+
+      // Stop any in-progress playback when new score arrives
+      teardownPlayback();
+      playerState = 'stopped';
+
+      abcReady = true;
+      setStatus(samplerReady ? 'Ready — press Play' : 'Loading samples…');
+      updateControls();
+    }
+
+    // ── postMessage listener ──────────────────────────────────────────────────
+    window.addEventListener('message', (event) => {
+      // Origin is '*' during development.
+      // TODO: tighten to 'https://butterflydreaming.info' in production.
+      try {
+        const { type, payload } = event.data;
+
+        switch (type) {
+          case 'BD_INIT':
+            abcDisplay.value = payload.text;
+            processABC(payload.text);
+            break;
+
+          case 'BD_STOP':
+            teardownPlayback();
+            playerState = 'stopped';
+            setStatus('Stopped');
+            updateControls();
+            break;
+
+          default:
+            // Ignore unrecognised types — other postMessage traffic may arrive
+            break;
+        }
+      } catch (err) {
+        console.error('music_module: error handling postMessage', err);
+      }
+    });
+  </script>
+
+</body>
+</html>

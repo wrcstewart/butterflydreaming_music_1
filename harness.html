@@ -1,0 +1,217 @@
+<!-- ButterflyDreaming Media Module — harness.html — BD Protocol v0.1 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ButterflyDreaming — Module Harness</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #0a0a0f;
+      color: #e8e8e0;
+      font-family: Georgia, 'Times New Roman', serif;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: normal;
+      color: #4a9b8e;
+      letter-spacing: 0.08em;
+      margin-bottom: 1.8rem;
+      text-transform: uppercase;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    label {
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #4a9b8e;
+    }
+
+    textarea {
+      background: #0f0f18;
+      color: #e8e8e0;
+      border: 1px solid #2a2a3a;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      padding: 0.75rem;
+      resize: vertical;
+      width: 100%;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: #4a9b8e;
+    }
+
+    #abc-input {
+      height: 220px;
+    }
+
+    button {
+      background: #0f0f18;
+      border: 1px solid #4a9b8e;
+      color: #4a9b8e;
+      cursor: pointer;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 0.85rem;
+      letter-spacing: 0.05em;
+      padding: 0.5rem 1.2rem;
+      text-transform: uppercase;
+      width: 100%;
+    }
+
+    button:hover {
+      background: #1a2a28;
+    }
+
+    button:active {
+      background: #243f3b;
+    }
+
+    .status {
+      border: 1px solid #2a2a3a;
+      color: #9e9e90;
+      font-size: 0.8rem;
+      font-style: italic;
+      min-height: 2.2rem;
+      padding: 0.5rem 0.75rem;
+    }
+
+    #music-module {
+      border: 1px solid #2a2a3a;
+      display: block;
+      height: 420px;
+      width: 100%;
+    }
+
+    .panel-label {
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #4a9b8e;
+      margin-bottom: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ButterflyDreaming — Module Harness</h1>
+
+  <div class="layout">
+
+    <!-- Left column: controls -->
+    <div class="panel">
+      <label for="abc-input">ABC Notation</label>
+      <textarea id="abc-input" spellcheck="false">X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+|A2 B2 c2 d2|e4 c4|B2 A2 G2 F2|E8|
+|A2 c2 e2 c2|A4 E4|F2 G2 A2 B2|c8|</textarea>
+
+      <button id="send-btn">Send to Player</button>
+
+      <label>Status</label>
+      <div class="status" id="status-display">Waiting for module…</div>
+    </div>
+
+    <!-- Right column: iframe player -->
+    <div class="panel">
+      <div class="panel-label">Player</div>
+      <iframe
+        id="music-module"
+        src="music_module.html"
+        title="ButterflyDreaming Music Module"
+        allow="autoplay"
+      ></iframe>
+    </div>
+
+  </div>
+
+  <script>
+    // ── Element refs ────────────────────────────────────────────────────────
+    const textarea     = document.getElementById('abc-input');
+    const sendBtn      = document.getElementById('send-btn');
+    const statusDisplay = document.getElementById('status-display');
+    const moduleFrame  = document.getElementById('music-module');
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    const setStatus = (text) => {
+      statusDisplay.textContent = text;
+    };
+
+    // Post a message to the music module iframe.
+    // Origin is '*' during development.
+    // TODO: tighten to 'https://butterflydreaming.info' in production.
+    const postToModule = (message) => {
+      moduleFrame.contentWindow.postMessage(message, '*');
+    };
+
+    // ── Send to Player ────────────────────────────────────────────────────────
+    sendBtn.addEventListener('click', () => {
+      const text = textarea.value;
+      postToModule({
+        type: 'BD_INIT',
+        payload: { text }
+      });
+    });
+
+    // ── Listen for messages from the module ──────────────────────────────────
+    window.addEventListener('message', (event) => {
+      // Origin is '*' during development.
+      // TODO: tighten to 'https://butterflydreaming.info' in production.
+      try {
+        const { type, payload } = event.data;
+
+        switch (type) {
+          case 'BD_READY':
+            setStatus('Module ready');
+            break;
+
+          case 'BD_UPDATE':
+            textarea.value = payload.text;
+            setStatus('Received update from module');
+            break;
+
+          case 'BD_ERROR':
+            setStatus(`Error: ${payload.message}`);
+            break;
+
+          default:
+            // Ignore unrecognised message types — other postMessage traffic
+            // (e.g. browser extensions, devtools) may arrive here.
+            break;
+        }
+      } catch (err) {
+        console.error('harness: error handling postMessage', err);
+      }
+    });
+  </script>
+
+</body>
+</html>
