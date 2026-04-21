@@ -508,3 +508,228 @@ await reverb.ready
 ```
 
 This should be awaited alongside Tone.loaded() during initialisation.
+
+### Amendment 10 — Vibrato Controls and %%bd_ Parameter Extension
+
+#### Vibrato Effect
+music_module.html adds a Tone.Vibrato effect in the signal chain after the
+Tone.Sampler and before Tone.Reverb:
+
+```javascript
+const vibrato = new Tone.Vibrato({
+  frequency: 4,
+  depth: 0,
+  type: "sine"
+})
+sampler.connect(vibrato)
+vibrato.connect(reverb)
+reverb.toDestination()
+```
+
+The oscillation type is fixed as "sine" and not exposed as a user control.
+Depth defaults to 0 — vibrato is off unless the user activates it.
+
+#### Vibrato Controls
+Two sliders are added to music_module.html alongside the reverb controls:
+
+**Frequency slider:**
+- Logarithmic scale — slider position range -0.3 to 1.3 (the exponent x)
+- Actual frequency calculated as: frequency = 10^x Hz
+- Marked positions:
+  - -0.3 = 0.5 Hz (very slow)
+  -  0   = 1.0 Hz
+  -  0.7 = 5.0 Hz (classical vibrato)
+  -  1.3 = 20 Hz (experimental)
+- Default slider position: 0.7 (= 5Hz, classical vibrato rate)
+- Display the calculated value next to the slider e.g. "5.0 Hz"
+- Maps to vibrato.frequency.value
+
+**Depth slider:**
+- Linear range 0 to 1
+- Left label: "None"  Right label: "Deep"
+- Default: 0 (vibrato off)
+- Maps to vibrato.depth.value
+
+#### %%bd_ Parameter Encoding Extension
+Two new %%bd_ fields are added to the ABC header parameter set:
+
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.0
+
+The value stored for %%bd_vibrato_frequency is the actual frequency in Hz,
+not the slider position. The module converts between Hz and slider position
+internally using x = log10(frequency).
+
+#### Outbound — Module to index.html
+The Send Back action now includes all four %%bd_ parameters:
+
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 1.8
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.0
+
+All four are written or updated in place in the ABC header on every Send Back.
+
+#### Inbound — index.html to Module
+When BD_INIT is received, the module additionally:
+1. If %%bd_vibrato_frequency found — convert Hz to slider position
+   using x = log10(frequency), set frequency slider to x
+2. If %%bd_vibrato_depth found — set depth slider to that value
+3. If no %%bd_vibrato fields found — leave sliders at current defaults
+4. Apply values to the Tone.Vibrato instance immediately
+
+#### Default Values
+If no %%bd_vibrato fields are present in the incoming ABC text:
+- Frequency: 5.0 Hz (slider position 0.7)
+- Depth: 0.0 (vibrato off)
+
+### Amendment 11 — Corrected Default Values
+
+If no %%bd_ fields are present in the incoming ABC text, all effects default
+to their neutral/off state:
+
+- %%bd_reverb_wet: 0.0 (fully dry, no reverb)
+- %%bd_reverb_decay: 1.0s (neutral, irrelevant when wet is 0)
+- %%bd_vibrato_depth: 0.0 (vibrato off)
+- %%bd_vibrato_frequency: 5.0 Hz (neutral, irrelevant when depth is 0)
+
+This supersedes the default values stated in Amendments 9 and 10.
+
+### Amendment 12 — Recommended Initial Values in Harness and Chorus Effect
+
+#### Part A — Recommended Initial Values in index.html
+The default ABC text in index.html is updated to include all %%bd_ fields
+with musically considered starting values. The module sliders must open in
+sync with these values via the BD_INIT round-trip on page load.
+
+The default ABC text in index.html should be:
+
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+|A2 B2 c2 d2|e4 c4|B2 A2 G2 F2|E8|
+|A2 c2 e2 c2|A4 E4|F2 G2 A2 B2|c8|
+
+This supersedes the default ABC text specified in the original spec.
+
+#### Part B — Chorus Effect
+music_module.html adds a Tone.Chorus effect in the signal chain between
+the Tone.Sampler and Tone.Vibrato:
+
+```javascript
+const chorus = new Tone.Chorus({
+  frequency: 1.5,
+  delayTime: 3.5,
+  depth: 0.4,
+  wet: 0.3
+})
+chorus.start()
+```
+
+The signal chain is:
+Sampler → Chorus → Vibrato → Reverb → Destination
+
+Note: Tone.Chorus requires chorus.start() to be called to begin its
+internal LFO. Frequency and delayTime are fixed and not exposed as
+controls — only wet and depth are user-controllable.
+
+#### Chorus Controls
+Two sliders are added to music_module.html alongside the existing controls:
+
+**Depth slider:**
+- Linear range 0 to 1
+- Left label: "Thin"  Right label: "Rich"
+- Default: 0.4
+- Maps to chorus.depth
+
+**Wet slider:**
+- Linear range 0 to 1
+- Left label: "Dry"  Right label: "Wet"
+- Default: 0.3
+- Maps to chorus.wet.value
+
+#### %%bd_ Parameter Encoding Extension
+Two new %%bd_ fields are added:
+
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+
+#### Inbound — index.html to Module
+When BD_INIT is received, the module additionally:
+1. If %%bd_chorus_wet found — set chorus wet slider to that value
+2. If %%bd_chorus_depth found — set chorus depth slider to that value
+3. If no %%bd_chorus fields found — use defaults above
+4. Apply values to the Tone.Chorus instance immediately
+
+#### Outbound — Module to index.html
+The Send Back action now includes all six %%bd_ parameters:
+
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+
+#### Updated Default Values
+If no %%bd_ fields are present in the incoming ABC text, all effects
+default to the recommended initial values listed in Part A above.
+This supersedes Amendment 11.
+
+### Amendment 13 — Window Depth and Title Changes
+
+#### Part A — Window Depth
+Increase the height of all windows and panels in both index.html and
+music_module.html by 20% to eliminate the need to scroll during normal
+use. This applies to the iframe in index.html and all panel elements
+in music_module.html.
+
+#### Part B — Title Changes
+The following title/heading text changes apply:
+
+In index.html:
+- Any occurrence of "MODULE HARNESS" or "Harness" in visible headings
+  or titles is replaced with "SIMPLE EXAMPLE OF TEXT TO MEDIA"
+
+In music_module.html:
+- Any occurrence of "MODULE" or "Music Module" in visible headings
+  or titles is replaced with "SIMPLE EXAMPLE OF TEXT TO MEDIA"
+
+Internal code identifiers, variable names, comments and the postMessage
+protocol message types (BD_INIT, BD_READY etc.) are not affected by
+this change — only visible UI text.
+
+### Amendment 14 — Textarea Height Correction
+
+Amendment 13 Part A is clarified: the height increase of 20% applies
+specifically to the ABC text textarea in index.html only. The player
+iframe and all panels in music_module.html are already adequately sized
+and should not be changed.
+
+### Amendment 15 — Textarea Height Final Correction
+
+History of textarea height changes:
+- Original spec: textarea height unspecified, defaulted to browser default
+- Amendment 13: requested 20% height increase — cc did not apply it to textarea
+- Amendment 14: clarified 20% increase applies to textarea only — cc applied
+  it incorrectly, reducing iframe height instead
+- Corrective prompt: restored iframe height, applied partial textarea increase
+  — result was still approximately 10% short of target
+
+Final instruction: increase the ABC textarea height in index.html by a further
+10% from its current value. This is the final correction and should result in
+the textarea being fully visible without scrolling during normal use.
+
+The target state after this amendment is:
+- ABC textarea in index.html: original height + 30% total
+- Player iframe in index.html: unchanged from its correct size
+- All panels in music_module.html: unchanged
