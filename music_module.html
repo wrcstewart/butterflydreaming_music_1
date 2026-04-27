@@ -525,11 +525,14 @@
     }
 
     // ── Extract notes from abcjs parseOnly output ─────────────────────────────
-    // Amendment 1: use parsed note objects directly so key-sig accidentals apply.
+    // Time offset is tracked here so all pitches in a chord share the same
+    // offset; t advances once per element, not once per pitch.
     function extractNotes(parsed) {
       const notes = [];
       const tune = parsed && parsed[0];
       if (!tune || !tune.lines) return notes;
+
+      let t = 0; // running offset in whole-note fractions
 
       for (const line of tune.lines) {
         if (!line.staff) continue;
@@ -538,15 +541,18 @@
           for (const voice of staff.voices) {
             for (const elem of voice) {
               if (elem.el_type !== 'note') continue;
-              if (elem.rest) continue;
+              if (elem.rest) { t += elem.duration; continue; }
               if (!elem.pitches || elem.pitches.length === 0) continue;
 
+              const elemTime = t; // captured once for all pitches in this chord
               elem.pitches.forEach(p => {
                 notes.push({
+                  time:          elemTime,
                   tonePitch:     abcPitchToTone(p.pitch, p.accidental),
-                  durationWhole: elem.duration // fraction of a whole note
+                  durationWhole: elem.duration
                 });
               });
+              t += elem.duration; // advance once after the whole chord
             }
           }
         }
@@ -558,13 +564,14 @@
     function buildEvents(notes, bpm) {
       const secondsPerWhole = 240 / bpm;
       const events = [];
-      let t = 0;
+      let endTime = 0;
       for (const n of notes) {
-        const durSecs = n.durationWhole * secondsPerWhole;
-        events.push({ time: t, note: n.tonePitch, duration: durSecs });
-        t += durSecs;
+        const timeSecs = n.time * secondsPerWhole;
+        const durSecs  = n.durationWhole * secondsPerWhole;
+        events.push({ time: timeSecs, note: n.tonePitch, duration: durSecs });
+        if (timeSecs + durSecs > endTime) endTime = timeSecs + durSecs;
       }
-      return { events, endTime: t };
+      return { events, endTime };
     }
 
     // ── Playback scheduling ───────────────────────────────────────────────────
