@@ -120,31 +120,69 @@
       height: 100%;
       width: 100%;
     }
+
+    .intro {
+      margin-bottom: 1.8rem;
+      opacity: 0.6;
+    }
+
+    .intro-title {
+      color: #4a9b8e;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.6rem;
+      text-transform: uppercase;
+    }
+
+    .intro p {
+      font-size: 0.78rem;
+      line-height: 1.6;
+      margin-bottom: 0.5rem;
+    }
+
+    .intro-rule {
+      border: none;
+      border-top: 1px solid #2a2a3a;
+      margin-top: 1rem;
+    }
   </style>
 </head>
 <body>
 
   <h1>ButterflyDreaming — Simple Example of Text to Media</h1>
 
+  <section class="intro">
+    <p class="intro-title">Simple Example of Text to Media — ButterflyDreaming Platform</p>
+    <p>This page demonstrates how a text node from the ButterflyDreaming graph can drive a media module. In the live platform the ABC notation and %%bd_ directives shown below would be found in a graph node, discovered and edited collaboratively by two anonymous users during a dyadic encounter.</p>
+    <p>The %%bd_ directives are a shared platform language — each directive is available to all media modules, which are free to interpret them in their own way or ignore them silently. A directive that controls reverb in a music module might influence colour or motion in a visual module.</p>
+    <p>In ButterflyDreaming the creative process is always collaborative. New nodes are produced by merge-editing of ancestor nodes, so the set of directives a user encounters grows gradually through inheritance rather than being invented from scratch. This protects users from being overwhelmed by unfamiliar parameters — each new directive arrives with the context of where it came from.</p>
+    <hr class="intro-rule">
+  </section>
+
   <div class="layout">
 
     <!-- Left column: controls -->
     <div class="panel">
       <label for="abc-input">ABC Notation</label>
-      <textarea id="abc-input" spellcheck="false">X:1
-T:Dream Fragment
-M:4/4
-L:1/8
-Q:1/4=60
-K:Amin
+      <textarea id="abc-input" spellcheck="false">%%bd_module music_module.html
 %%bd_reverb_wet 0.35
 %%bd_reverb_decay 2.5
 %%bd_vibrato_frequency 5.0
 %%bd_vibrato_depth 0.2
 %%bd_chorus_wet 0.3
 %%bd_chorus_depth 0.4
-|A2 B2 c2 d2|e4 c4|B2 A2 G2 F2|E8|
-|A2 c2 e2 c2|A4 E4|F2 G2 A2 B2|c8|</textarea>
+%%bd_loop true
+%%bd_loop_gap 6
+%%bd_score [
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+|A2 B2 c2 d2|e4 c4|
+|A2 c2 e2 c2|A4 E4|
+%%bd_]</textarea>
 
       <button id="send-btn">Send to Player</button>
 

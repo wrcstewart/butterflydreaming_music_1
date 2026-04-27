@@ -133,6 +133,14 @@
       padding: 0 0.25rem;
     }
 
+    #module-label {
+      color: #5a6a68;
+      font-size: 0.7rem;
+      letter-spacing: 0.03em;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
     /* ── Chorus controls ───────────────────────────────────────────────────── */
     #chorus-section {
       border: 1px solid #1e1e2a;
@@ -153,6 +161,8 @@
     <!-- Amendment 6: text lives in the harness; Send Back returns stored text
          with current %%bd_ parameters encoded (Amendment 9) -->
     <button id="send-back-btn">Send Back</button>
+    <!-- Amendment 17: module name drawn from %%bd_module, fallback to filename -->
+    <span id="module-label">Module: music_module.html</span>
   </div>
 
   <!-- Amendment 9: reverb controls -->
@@ -255,6 +265,7 @@
     const depthSlider       = document.getElementById('depth-slider');
     const chorusDepthSlider = document.getElementById('chorus-depth-slider');
     const chorusWetSlider   = document.getElementById('chorus-wet-slider');
+    const moduleLabel       = document.getElementById('module-label');
 
     // ── Module state ──────────────────────────────────────────────────────────
     let samplerReady  = false;
@@ -265,6 +276,10 @@
     let endTimeSecs   = 0;
     // Amendment 6: text stored internally; no textarea in module
     let storedAbcText = '';
+    // Amendment 21: loop state
+    let loopEnabled = true;
+    let loopGapSecs = 6;
+    let loopTimer   = null;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     const setStatus = (msg) => { statusEl.textContent = msg; };
@@ -336,7 +351,6 @@
     postToParent({ type: 'BD_READY' });
 
     // ── %%bd_ parameter parsing ───────────────────────────────────────────────
-    // Reads %%bd_reverb_wet and %%bd_reverb_decay from the ABC header.
     // Returns null for any value not found (caller uses defaults).
     function parseBdParams(text) {
       const wetMatch        = text.match(/^%%bd_reverb_wet\s+([\d.]+)/m);
@@ -345,28 +359,41 @@
       const depthMatch      = text.match(/^%%bd_vibrato_depth\s+([\d.]+)/m);
       const chorusWetMatch  = text.match(/^%%bd_chorus_wet\s+([\d.]+)/m);
       const chorusDepthMatch = text.match(/^%%bd_chorus_depth\s+([\d.]+)/m);
+      const loopMatch       = text.match(/^%%bd_loop\s+(true|false)/m);
+      const loopGapMatch    = text.match(/^%%bd_loop_gap\s+([\d.]+)/m);
       return {
         wet:          wetMatch        ? parseFloat(wetMatch[1])        : null,
         decay:        decayMatch      ? parseFloat(decayMatch[1])      : null,
         vibratoFreq:  freqMatch       ? parseFloat(freqMatch[1])       : null,
         vibratoDepth: depthMatch      ? parseFloat(depthMatch[1])      : null,
         chorusWet:    chorusWetMatch  ? parseFloat(chorusWetMatch[1])  : null,
-        chorusDepth:  chorusDepthMatch ? parseFloat(chorusDepthMatch[1]) : null
+        chorusDepth:  chorusDepthMatch ? parseFloat(chorusDepthMatch[1]) : null,
+        loopEnabled:  loopMatch       ? loopMatch[1] === 'true'        : null,
+        loopGap:      loopGapMatch    ? parseFloat(loopGapMatch[1])    : null
       };
     }
 
+    // ── %%bd_score block extraction (Amendment 20) ───────────────────────────
+    // Extracts the ABC content from inside a %%bd_score [...] %%bd_] block.
+    // Falls back to the full text if no such block is found.
+    function extractScore(text) {
+      const match = text.match(/^%%bd_score\s*\[\s*\n([\s\S]*?)^%%bd_\]$/m);
+      return match ? match[1] : text;
+    }
+
     // ── %%bd_ parameter encoding ──────────────────────────────────────────────
-    // Replaces existing %%bd_ lines or inserts them before the first bar line.
+    // Replaces existing %%bd_ lines or inserts them before %%bd_score.
     // decay is stored as actual seconds (not slider position).
-    // Amendment 12: encodes all six %%bd_ parameters.
-    // All six are written or updated on every Send Back.
-    function encodeBdParams(text, wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth) {
-      const wetLine        = `%%bd_reverb_wet ${wet.toFixed(2)}`;
-      const decayLine      = `%%bd_reverb_decay ${decaySecs.toFixed(3)}`;
-      const freqLine       = `%%bd_vibrato_frequency ${vibratoFreq.toFixed(3)}`;
-      const depthLine      = `%%bd_vibrato_depth ${vibratoDepth.toFixed(2)}`;
-      const chorusWetLine  = `%%bd_chorus_wet ${chorusWet.toFixed(2)}`;
+    // All parameters are written or updated on every Send Back.
+    function encodeBdParams(text, wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth, loopEnabledVal, loopGapVal) {
+      const wetLine         = `%%bd_reverb_wet ${wet.toFixed(2)}`;
+      const decayLine       = `%%bd_reverb_decay ${decaySecs.toFixed(3)}`;
+      const freqLine        = `%%bd_vibrato_frequency ${vibratoFreq.toFixed(3)}`;
+      const depthLine       = `%%bd_vibrato_depth ${vibratoDepth.toFixed(2)}`;
+      const chorusWetLine   = `%%bd_chorus_wet ${chorusWet.toFixed(2)}`;
       const chorusDepthLine = `%%bd_chorus_depth ${chorusDepth.toFixed(2)}`;
+      const loopLine        = `%%bd_loop ${loopEnabledVal ? 'true' : 'false'}`;
+      const loopGapLine     = `%%bd_loop_gap ${Math.round(loopGapVal)}`;
 
       // Replace any existing %%bd_ lines in place
       let result = text
@@ -375,9 +402,11 @@
         .replace(/^%%bd_vibrato_frequency\s+[\d.]+/m, freqLine)
         .replace(/^%%bd_vibrato_depth\s+[\d.]+/m,     depthLine)
         .replace(/^%%bd_chorus_wet\s+[\d.]+/m,        chorusWetLine)
-        .replace(/^%%bd_chorus_depth\s+[\d.]+/m,      chorusDepthLine);
+        .replace(/^%%bd_chorus_depth\s+[\d.]+/m,      chorusDepthLine)
+        .replace(/^%%bd_loop\s+(true|false)/m,         loopLine)
+        .replace(/^%%bd_loop_gap\s+[\d.]+/m,          loopGapLine);
 
-      // Collect any still absent and insert them as a block before the first bar
+      // Collect any still-absent lines and insert before %%bd_score (or first |)
       const missing = [];
       if (!/^%%bd_reverb_wet/m.test(result))        missing.push(wetLine);
       if (!/^%%bd_reverb_decay/m.test(result))      missing.push(decayLine);
@@ -385,10 +414,13 @@
       if (!/^%%bd_vibrato_depth/m.test(result))     missing.push(depthLine);
       if (!/^%%bd_chorus_wet/m.test(result))        missing.push(chorusWetLine);
       if (!/^%%bd_chorus_depth/m.test(result))      missing.push(chorusDepthLine);
+      if (!/^%%bd_loop\b/m.test(result))            missing.push(loopLine);
+      if (!/^%%bd_loop_gap\b/m.test(result))        missing.push(loopGapLine);
 
       if (missing.length > 0) {
         const lines = result.split('\n');
-        let insertIdx = lines.findIndex(l => l.includes('|'));
+        let insertIdx = lines.findIndex(l => /^%%bd_score/.test(l));
+        if (insertIdx === -1) insertIdx = lines.findIndex(l => l.includes('|'));
         if (insertIdx === -1) insertIdx = lines.length;
         lines.splice(insertIdx, 0, ...missing);
         result = lines.join('\n');
@@ -400,7 +432,7 @@
     // ── Apply %%bd_ params to UI + effects ───────────────────────────────────
     // decay and vibratoFreq are in real units (seconds, Hz); log10 converts to
     // slider position. Called on BD_INIT and when defaults are needed.
-    function applyBdParams(wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth) {
+    function applyBdParams(wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth, loopEnabledVal, loopGapVal) {
       // Reverb
       wetSlider.value          = wet;
       reverb.wet.value         = wet;
@@ -421,6 +453,10 @@
       chorus.depth             = chorusDepth;
       chorusWetSlider.value    = chorusWet;
       chorus.wet.value         = chorusWet;
+
+      // Loop
+      loopEnabled = loopEnabledVal;
+      loopGapSecs = loopGapVal;
     }
 
     // ── Wet slider ────────────────────────────────────────────────────────────
@@ -532,6 +568,8 @@
 
     // ── Playback scheduling ───────────────────────────────────────────────────
     function teardownPlayback() {
+      clearTimeout(loopTimer);
+      loopTimer = null;
       if (notePart) { notePart.stop(0); notePart.dispose(); notePart = null; }
       Tone.Transport.stop();
       Tone.Transport.cancel(0);
@@ -547,9 +585,14 @@
       notePart.start(0);
 
       Tone.Transport.scheduleOnce(() => {
-        playerState = 'finished';
-        setStatus('Finished');
-        updateControls();
+        if (loopEnabled) {
+          setStatus('Looping\u2026');
+          loopTimer = setTimeout(() => { startPlayback(); }, loopGapSecs * 1000);
+        } else {
+          playerState = 'finished';
+          setStatus('Finished');
+          updateControls();
+        }
       }, endTimeSecs + 0.05);
 
       Tone.Transport.start();
@@ -594,16 +637,17 @@
       const vibratoDepth = parseFloat(depthSlider.value);
       const chorusWet    = parseFloat(chorusWetSlider.value);
       const chorusDepth  = parseFloat(chorusDepthSlider.value);
-      const updatedText  = encodeBdParams(storedAbcText, wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth);
+      const updatedText  = encodeBdParams(storedAbcText, wet, decaySecs, vibratoFreq, vibratoDepth, chorusWet, chorusDepth, loopEnabled, loopGapSecs);
       storedAbcText = updatedText; // keep in sync for subsequent Send Backs
       postToParent({ type: 'BD_UPDATE', payload: { text: updatedText } });
     });
 
     // ── ABC parsing ───────────────────────────────────────────────────────────
     function processABC(text) {
+      const abcText = extractScore(text);
       let parsed;
       try {
-        parsed = ABCJS.parseOnly(text);
+        parsed = ABCJS.parseOnly(abcText);
       } catch (err) {
         const msg = 'Failed to parse ABC notation';
         setStatus(msg);
@@ -621,7 +665,7 @@
         return;
       }
 
-      const bpm = parseBPM(text);
+      const bpm = parseBPM(abcText);
       Tone.Transport.bpm.value = bpm;
 
       const built = buildEvents(notes, bpm);
@@ -647,16 +691,23 @@
           case 'BD_INIT': {
             storedAbcText = payload.text;
 
-            // Amendments 9, 10: parse all %%bd_ params and apply to sliders +
-            // effects. If a field is absent, the current slider value is kept.
-            const { wet, decay, vibratoFreq, vibratoDepth, chorusWet, chorusDepth } = parseBdParams(payload.text);
+            // Amendment 17: update module name label from %%bd_module field.
+            const moduleMatch = payload.text.match(/^%%bd_module\s+(\S+)/m);
+            moduleLabel.textContent = `Module: ${moduleMatch ? moduleMatch[1] : 'music_module.html'}`;
+
+
+            // Parse all %%bd_ params and apply to sliders + effects + loop state.
+            // If a field is absent, the current value is kept.
+            const { wet, decay, vibratoFreq, vibratoDepth, chorusWet, chorusDepth, loopEnabled: le, loopGap: lg } = parseBdParams(payload.text);
             applyBdParams(
               wet          !== null ? wet          : parseFloat(wetSlider.value),
               decay        !== null ? decay        : Math.pow(10, parseFloat(decaySlider.value)),
               vibratoFreq  !== null ? vibratoFreq  : Math.pow(10, parseFloat(freqSlider.value)),
               vibratoDepth !== null ? vibratoDepth : parseFloat(depthSlider.value),
               chorusWet    !== null ? chorusWet    : parseFloat(chorusWetSlider.value),
-              chorusDepth  !== null ? chorusDepth  : parseFloat(chorusDepthSlider.value)
+              chorusDepth  !== null ? chorusDepth  : parseFloat(chorusDepthSlider.value),
+              le           !== null ? le           : loopEnabled,
+              lg           !== null ? lg           : loopGapSecs
             );
 
             processABC(payload.text);
