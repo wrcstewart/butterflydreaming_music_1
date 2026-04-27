@@ -541,10 +541,11 @@
               if (elem.rest) continue;
               if (!elem.pitches || elem.pitches.length === 0) continue;
 
-              const p = elem.pitches[0];
-              notes.push({
-                tonePitch:     abcPitchToTone(p.pitch, p.accidental),
-                durationWhole: elem.duration // fraction of a whole note
+              elem.pitches.forEach(p => {
+                notes.push({
+                  tonePitch:     abcPitchToTone(p.pitch, p.accidental),
+                  durationWhole: elem.duration // fraction of a whole note
+                });
               });
             }
           }
