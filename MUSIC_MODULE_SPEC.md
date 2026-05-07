@@ -733,3 +733,258 @@ The target state after this amendment is:
 - ABC textarea in index.html: original height + 30% total
 - Player iframe in index.html: unchanged from its correct size
 - All panels in music_module.html: unchanged
+
+### Amendment 16 — Module Type Declaration
+
+A %%bd_ field is added to the ABC header to declare which media module
+file should be used to render this text. This allows the harness to
+identify and load the correct module from the pool.
+
+The field is:
+
+%%bd_module music_module.html
+
+This line should appear as the first %%bd_ field in the ABC header,
+before all other %%bd_ parameters. The updated default ABC text in
+index.html is therefore:
+
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+%%bd_module music_module.html
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+|A2 B2 c2 d2|e4 c4|B2 A2 G2 F2|E8|
+|A2 c2 e2 c2|A4 E4|F2 G2 A2 B2|c8|
+
+The harness reads %%bd_module on receiving any ABC text and uses the
+value to identify which iframe to show from the module pool. If no
+%%bd_module field is present the harness should default to
+music_module.html.
+
+### Amendment 17 — Module Name Display in music_module.html
+
+Add a small text label alongside the player controls in music_module.html
+displaying the module filename, drawn from the %%bd_module field:
+
+%%bd_module music_module.html
+
+This should appear as plain text in a subtle style consistent with the
+existing UI — not a heading, just a small identifier. For example:
+
+Module: music_module.html
+
+If no %%bd_module field is present in the received ABC text, display
+the actual filename as a fallback:
+
+Module: music_module.html
+
+### Amendment 18 — %%bd_ Namespace Convention and Philosophy
+
+The %%bd_ namespace is global across all modules. No module-specific
+sub-namespace is used. Directive names are chosen to be self-evidently
+descriptive — %%bd_reverb_wet could only ever mean one thing across
+the platform. Modules silently ignore any directive they do not implement.
+
+Some directives are intentionally shared across module types. A directive
+such as %%bd_intensity may influence the loudness of a music module and
+the brightness of a visual module — the same word, different expression.
+This ambiguity is a feature consistent with the platform's philosophy of
+emergent meaning through encounter.
+
+A published registry of known directives and which modules implement them
+will be maintained in the project repository, growing organically as new
+modules are contributed.
+
+### Amendment 19 — Explanatory Header Text for index.html
+
+Add an explanatory section at the top of index.html above all controls,
+in a calm understated style consistent with the existing UI, smaller than
+the main UI elements, in off-white at reduced opacity (suggest 0.6),
+separated from the controls below by a thin horizontal rule.
+
+The text should read:
+
+SIMPLE EXAMPLE OF TEXT TO MEDIA — ButterflyDreaming Platform
+
+This page demonstrates how a text node from the ButterflyDreaming graph
+can drive a media module. In the live platform the ABC notation and
+%%bd_ directives shown below would be found in a graph node, discovered
+and edited collaboratively by two anonymous users during a dyadic encounter.
+
+The %%bd_ directives are a shared platform language — each directive is
+available to all media modules, which are free to interpret them in their
+own way or ignore them silently. A directive that controls reverb in a
+music module might influence colour or motion in a visual module.
+
+In ButterflyDreaming the creative process is always collaborative. New
+nodes are produced by merge-editing of ancestor nodes, so the set of
+directives a user encounters grows gradually through inheritance rather
+than being invented from scratch. This protects users from being
+overwhelmed by unfamiliar parameters — each new directive arrives with
+the context of where it came from.
+
+### Amendment 20 — Revised BD Directive Syntax
+
+This amendment supersedes all previous syntax descriptions including all
+semicolon terminators mentioned in Amendments 9 through 17.
+Semicolons are not used in the BD directive syntax.
+
+There are exactly two termination rules:
+
+1. A single-line directive is terminated by a newline.
+   No special character is needed.
+
+2. A multi-line directive is opened by [ on the same line as the
+   directive name and terminated by %%bd_] on its own line.
+   The closing marker is namespaced to the platform prefix and cannot
+   appear naturally in ABC notation, SVG, JSON, prose, or any other
+   content format.
+
+Single-line directives:
+%%bd_module music_module.html
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+
+Multi-line directive:
+%%bd_score [
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+|A2 B2 c2 d2|e4 c4|
+|A2 c2 e2 c2|A4 E4|
+%%bd_]
+
+The parser is a two-state machine:
+- text state: scans for %%bd_ directives, extracts single-line values,
+  switches to bracket state when [ is found after a directive name
+- bracket state: collects all lines into the directive value until
+  %%bd_] appears alone on a line, then returns to text state
+
+### Amendment 21 — Loop Directives
+
+Two new directives control playback looping:
+
+%%bd_loop true
+%%bd_loop_gap 6
+
+%%bd_loop controls whether the score repeats after completion.
+Default: true
+
+%%bd_loop_gap sets the silence in seconds between the end of the score
+and the restart of the sequence. This allows the reverb tail of the
+final note to decay naturally before the sequence begins again.
+Default: 6
+
+These directives should be added to the default text in index.html.
+
+### Amendment 22 — Updated Default Text in index.html
+
+The complete default ABC text in index.html is:
+
+%%bd_module music_module.html
+%%bd_reverb_wet 0.35
+%%bd_reverb_decay 2.5
+%%bd_vibrato_frequency 5.0
+%%bd_vibrato_depth 0.2
+%%bd_chorus_wet 0.3
+%%bd_chorus_depth 0.4
+%%bd_loop true
+%%bd_loop_gap 6
+%%bd_score [
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+|A2 B2 c2 d2|e4 c4|
+|A2 c2 e2 c2|A4 E4|
+%%bd_]
+
+This supersedes all previous default text specifications.
+
+### Amendment 23 — Multi-block Sequences (Future Extension)
+
+The directive syntax is designed to support sequential multi-block
+execution in a future version. A node may contain multiple %%bd_score
+blocks, each preceded by directives that modify only the parameters
+that change. The module would play each block in order, applying
+directive changes cumulatively between blocks. The %%bd_module directive
+appears only once at the top of the node.
+
+This capability is NOT implemented in the current version. A single
+%%bd_score block per node is the current limit. Multi-block sequencing
+is reserved for a future release once the collaborative editing system
+is established and the timing and state-tracking requirements are
+better understood.
+
+### Amendment 24 — ABC Notation Box Height and Title
+
+Increase the height of the ABC notation textarea in index.html by 3 lines
+from its current value. This is in addition to previous height adjustments
+and should eliminate the need to scroll with the current default text.
+
+Change the label above the textarea from:
+
+ABC NOTATION
+
+to:
+
+EXTENDED ABC NOTATION
+
+### Amendment 25 — ABC Chord Notation Support
+
+The current extractNotes function takes only pitches[0] from each element,
+silently discarding all other pitches in a chord. This amendment implements
+full chord support.
+
+#### Fix to extractNotes
+Replace the single pitch extraction with iteration over all pitches in
+elem.pitches, pushing one event per pitch at the same time offset:
+
+Instead of:
+  const p = elem.pitches[0];
+  notes.push({ tonePitch: abcPitchToTone(p.pitch, p.accidental),
+               durationWhole: elem.duration });
+
+Use:
+  elem.pitches.forEach(p => {
+    notes.push({ tonePitch: abcPitchToTone(p.pitch, p.accidental),
+                 durationWhole: elem.duration });
+  });
+
+Tone.Part and triggerAttackRelease handle simultaneous notes at the same
+time offset correctly — no further changes to the playback engine are needed.
+
+#### Updated Default ABC Score for Testing
+Update the default score in index.html to include two chords for testing.
+Replace the existing score lines with:
+
+%%bd_score [
+X:1
+T:Dream Fragment
+M:4/4
+L:1/8
+Q:1/4=60
+K:Amin
+|A2 B2 [CEA]4 d2|e4 [EAc]4|
+|A2 c2 e2 c2|A4 E4|
+%%bd_]
+
+The chord [CEA] on beat 3 of bar 1 and [EAc] on beat 3 of bar 2 provide
+clear audible tests of simultaneous note playback.
